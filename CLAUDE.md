@@ -47,3 +47,30 @@ Al arrancar un proyecto real a partir de esta plantilla: copiar este `CLAUDE.md`
 carpeta `.claude/` al nuevo repo, y ajustar solo el contenido específico del producto
 (nombre, stack si ya está decidido, etc.) — las dos reglas de arriba se mantienen sin
 cambios.
+
+## CI/CD y review condicional (sin APIs de pago)
+
+El pipeline vive en `.github/workflows/ci.yml` y no usa ninguna API de pago (no OpenAI,
+no Claude API, etc.). Resumen del flujo — el detalle completo está en `README.md`:
+
+- En **todo PR hacia `dev` o `main`** corre el job `checks`: lint y tests unitarios
+  (hoy son placeholders genéricos porque el stack todavía no está decidido — ver los
+  comentarios en `ci.yml` para reemplazarlos por linter/tests reales por lenguaje) y el
+  cálculo de tamaño del diff + detección de carpetas sensibles.
+- Si el diff supera **80 líneas cambiadas** (`env.DIFF_LINE_THRESHOLD` en `ci.yml`) **o**
+  toca una ruta listada en `.github/sensitive-paths.txt`, se dispara el job
+  `local-review`. Ambos umbrales son ajustables — el número de líneas se cambia en
+  `ci.yml`, las rutas sensibles se agregan/quitan en `.github/sensitive-paths.txt`, sin
+  tocar el workflow.
+- `local-review` corre en un **runner self-hosted** (label `self-hosted`) en la máquina
+  CachyOS/Arch del CEO, donde vive Ollama (`localhost:11434`, modelo `qwen2.5:7b` por
+  defecto — cambiarlo en `env.OLLAMA_MODEL` dentro de `ci.yml`, después de bajarlo con
+  `ollama pull <modelo>`). Si Ollama no responde, el job **falla explícitamente** con un
+  mensaje de "review local no disponible, revisar manualmente" — nunca da un OK falso ni
+  bloquea en silencio.
+- **`/solopreneur:review` no es parte del pipeline automático.** Queda como revisión
+  manual bajo demanda, a pedido del CEO, para los casos que el reviewer local (un modelo
+  de 7B corriendo local) no cubre bien — típicamente lógica de negocio compleja que
+  requiere más razonamiento que un modelo chico.
+- Cómo registrar el runner self-hosted en la máquina Arch: ver la sección
+  "CI/CD — runner self-hosted" de `README.md`.

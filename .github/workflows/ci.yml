@@ -130,6 +130,14 @@ jobs:
     needs: checks
     if: needs.checks.outputs.trigger_review == 'true'
     runs-on: [self-hosted]
+    # Permisos mínimos scoped a este job: necesita comentar en el PR
+    # (gh pr comment) pero no debe heredar más que lectura del contenido.
+    # No tocar los permisos por defecto del repo (solo lectura) ni agregar
+    # este bloque a nivel de workflow — dejaría todos los jobs con más
+    # permisos de los que necesitan.
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       OLLAMA_HOST: http://localhost:11434
       # Modelo a usar. Para cambiarlo: descargarlo con `ollama pull <modelo>`

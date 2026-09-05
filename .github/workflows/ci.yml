@@ -134,7 +134,7 @@ jobs:
       OLLAMA_HOST: http://localhost:11434
       # Modelo a usar. Para cambiarlo: descargarlo con `ollama pull <modelo>`
       # en la máquina del runner y actualizar este valor.
-      OLLAMA_MODEL: qwen2.5:7b
+      OLLAMA_MODEL: phi4-mini
     steps:
       - name: Checkout
         uses: actions/checkout@v4

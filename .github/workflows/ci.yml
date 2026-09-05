@@ -1,0 +1,225 @@
+name: CI
+
+# Corre en cada PR hacia dev o main.
+on:
+  pull_request:
+    branches: [dev, main]
+
+env:
+  # Umbral de líneas cambiadas (insertions + deletions) a partir del cual se
+  # dispara el job "local-review" aunque el PR no toque carpetas sensibles.
+  # Ajustar este número según el proyecto.
+  DIFF_LINE_THRESHOLD: 80
+  # Lista de carpetas/rutas sensibles. Editar ese archivo, no este workflow,
+  # para agregar o quitar rutas.
+  SENSITIVE_PATHS_FILE: .github/sensitive-paths.txt
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Job que SIEMPRE corre: lint, tests unitarios, y el cálculo de si hace
+  # falta disparar la revisión local con IA.
+  # ---------------------------------------------------------------------
+  checks:
+    name: Lint, tests y análisis de diff
+    runs-on: ubuntu-latest
+    outputs:
+      trigger_review: ${{ steps.diff-check.outputs.trigger_review }}
+      diff_lines: ${{ steps.diff-check.outputs.diff_lines }}
+      sensitive_hit: ${{ steps.diff-check.outputs.sensitive_hit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth 0 porque necesitamos diffear contra el base del PR.
+          fetch-depth: 0
+
+      # ---------------------------------------------------------------
+      # LINT — placeholder genérico. El stack real todavía no está
+      # decidido para este proyecto (es una plantilla). Reemplazar este
+      # step por el linter correspondiente cuando se decida, por ejemplo:
+      #
+      #   Python:   pip install ruff && ruff check .
+      #   Node/TS:  npm ci && npm run lint
+      #   Go:       go vet ./... && staticcheck ./...
+      #   Rust:     cargo clippy --all-targets --all-features -- -D warnings
+      # ---------------------------------------------------------------
+      - name: Lint (placeholder — reemplazar por el linter real)
+        run: |
+          echo "TODO(ci): no hay linter configurado todavía."
+          echo "Reemplazar este step por el linter del stack elegido (ver comentarios en ci.yml)."
+
+      # ---------------------------------------------------------------
+      # TESTS — placeholder genérico. Reemplazar cuando el stack esté
+      # decidido, por ejemplo:
+      #
+      #   Python:   pip install -r requirements.txt && pytest
+      #   Node/TS:  npm ci && npm test
+      #   Go:       go test ./...
+      #   Rust:     cargo test
+      # ---------------------------------------------------------------
+      - name: Unit tests (placeholder — reemplazar por los tests reales)
+        run: |
+          echo "TODO(ci): no hay tests unitarios configurados todavía."
+          echo "Reemplazar este step por el runner de tests del stack elegido (ver comentarios en ci.yml)."
+
+      - name: Calcular tamaño del diff y carpetas sensibles
+        id: diff-check
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Suma de líneas insertadas + borradas en todo el diff del PR.
+          DIFF_LINES=$(git diff --numstat "$BASE_SHA" "$HEAD_SHA" \
+            | awk '{add+=$1; del+=$2} END {print add+del+0}')
+          echo "Líneas cambiadas en el diff: $DIFF_LINES (umbral: $DIFF_LINE_THRESHOLD)"
+
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "Archivos modificados:"
+          echo "$CHANGED_FILES"
+
+          SENSITIVE_HIT=false
+          if [ -f "$SENSITIVE_PATHS_FILE" ]; then
+            while IFS= read -r raw_path || [ -n "$raw_path" ]; do
+              # Ignorar comentarios y líneas vacías.
+              path="${raw_path%%#*}"
+              path="$(echo "$path" | xargs)"
+              [ -z "$path" ] && continue
+
+              while IFS= read -r file; do
+                [ -z "$file" ] && continue
+                case "$file" in
+                  "$path"*)
+                    echo "Ruta sensible detectada: $file (regla: $path)"
+                    SENSITIVE_HIT=true
+                    ;;
+                esac
+              done <<< "$CHANGED_FILES"
+            done < "$SENSITIVE_PATHS_FILE"
+          fi
+
+          TRIGGER=false
+          if [ "$DIFF_LINES" -gt "$DIFF_LINE_THRESHOLD" ] || [ "$SENSITIVE_HIT" = true ]; then
+            TRIGGER=true
+          fi
+
+          {
+            echo "diff_lines=$DIFF_LINES"
+            echo "sensitive_hit=$SENSITIVE_HIT"
+            echo "trigger_review=$TRIGGER"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Resumen del diff"
+            echo "- Líneas cambiadas: $DIFF_LINES (umbral: $DIFF_LINE_THRESHOLD)"
+            echo "- ¿Toca carpeta sensible?: $SENSITIVE_HIT"
+            echo "- ¿Dispara \`local-review\`?: $TRIGGER"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------
+  # Job condicional: solo corre si el diff supera el umbral o toca una
+  # carpeta sensible. Pensado para un runner self-hosted en una máquina
+  # con Ollama corriendo en localhost:11434 (sin usar ninguna API de pago).
+  #
+  # Registrar el runner (ver README.md / CLAUDE.md) con la label
+  # "self-hosted" para que este job pueda ejecutarse ahí.
+  # ---------------------------------------------------------------------
+  local-review:
+    name: Review local (Ollama)
+    needs: checks
+    if: needs.checks.outputs.trigger_review == 'true'
+    runs-on: [self-hosted]
+    env:
+      OLLAMA_HOST: http://localhost:11434
+      # Modelo a usar. Para cambiarlo: descargarlo con `ollama pull <modelo>`
+      # en la máquina del runner y actualizar este valor.
+      OLLAMA_MODEL: qwen2.5:7b
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Obtener diff del PR
+        run: |
+          set -euo pipefail
+          git diff "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > /tmp/pr.diff
+          # Acotamos el tamaño para no saturar el contexto del modelo local
+          # (no es un límite de costo, es un límite de contexto del modelo).
+          head -c 60000 /tmp/pr.diff > /tmp/pr.diff.trimmed
+          echo "Diff truncado a $(wc -c < /tmp/pr.diff.trimmed) bytes (de $(wc -c < /tmp/pr.diff) originales)."
+
+      - name: Verificar disponibilidad de Ollama
+        id: check-ollama
+        run: |
+          set +e
+          HTTP_CODE=$(curl -s -m 5 --connect-timeout 5 -o /dev/null -w "%{http_code}" "$OLLAMA_HOST/api/tags")
+          CURL_EXIT=$?
+          set -e
+          if [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP_CODE" != "200" ]; then
+            echo "unavailable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "unavailable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Review local no disponible
+        if: steps.check-ollama.outputs.unavailable == 'true'
+        run: |
+          echo "::error::Review local no disponible: no se pudo conectar a Ollama en $OLLAMA_HOST (timeout o conexión rechazada). Revisar manualmente."
+          exit 1
+
+      - name: Enviar diff a Ollama
+        id: ollama-review
+        if: steps.check-ollama.outputs.unavailable == 'false'
+        run: |
+          set -euo pipefail
+
+          PROMPT_FILE=$(mktemp)
+          {
+            echo "Sos un revisor de código senior. Analizá el siguiente diff de un pull request."
+            echo "Reportá, en español y de forma concisa: posibles bugs, problemas de seguridad,"
+            echo "y sugerencias de mejora. Priorizá los hallazgos más importantes primero."
+            echo ""
+            echo "Diff:"
+            cat /tmp/pr.diff.trimmed
+          } > "$PROMPT_FILE"
+
+          jq -Rs --arg model "$OLLAMA_MODEL" '{model: $model, prompt: ., stream: false}' \
+            "$PROMPT_FILE" > /tmp/payload.json
+
+          if ! curl -sS -m 300 -X POST "$OLLAMA_HOST/api/generate" \
+              -H "Content-Type: application/json" \
+              -d @/tmp/payload.json \
+              -o /tmp/ollama_response.json; then
+            echo "::error::Review local no disponible: fallo al llamar a la API de Ollama en $OLLAMA_HOST. Revisar manualmente."
+            exit 1
+          fi
+
+          jq -r '.response // empty' /tmp/ollama_response.json > /tmp/review.txt
+
+          if [ ! -s /tmp/review.txt ]; then
+            echo "::error::Review local no disponible: Ollama respondió sin contenido. Revisar manualmente."
+            exit 1
+          fi
+
+      - name: Postear comentario en el PR
+        if: steps.ollama-review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Review local (Ollama · $OLLAMA_MODEL)"
+            echo ""
+            cat /tmp/review.txt
+            echo ""
+            echo "---"
+            echo "_Generado automáticamente por el job \`local-review\` en un runner self-hosted,"
+            echo "sin usar APIs de pago. Para revisión manual de casos que este reviewer no cubre"
+            echo "bien (lógica de negocio compleja), usar \`/solopreneur:review\`._"
+          } > /tmp/comment-body.md
+
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body-file /tmp/comment-body.md \
+            --repo "${{ github.repository }}"

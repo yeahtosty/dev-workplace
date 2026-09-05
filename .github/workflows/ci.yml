@@ -185,7 +185,7 @@ jobs:
             cat /tmp/pr.diff.trimmed
           } > "$PROMPT_FILE"
 
-          jq -Rs --arg model "$OLLAMA_MODEL" '{model: $model, prompt: ., stream: false}' \
+          jq -Rs --arg model "$OLLAMA_MODEL" '{model: $model, prompt: ., stream: false, options: {num_predict: 500, temperature: 0.2}}' \
             "$PROMPT_FILE" > /tmp/payload.json
 
           if ! curl -sS -m 300 -X POST "$OLLAMA_HOST/api/generate" \

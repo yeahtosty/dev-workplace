@@ -186,14 +186,26 @@ jobs:
           PROMPT_FILE=$(mktemp)
           {
             echo "You are a senior code reviewer. Analyze the following pull request diff."
-            echo "Report, concisely: possible bugs, security issues, and suggestions for"
-            echo "improvement. Prioritize the most important findings first."
+            echo "Report only concrete, falsifiable findings — no vague or generic feedback."
+            echo ""
+            echo "For every bug or security issue you report, you MUST include all three:"
+            echo "  - Input: the exact input or scenario that triggers it."
+            echo "  - Expected: what the correct output/behavior should be."
+            echo "  - Actual: what the code actually produces or does instead."
+            echo "If you cannot fill in all three for a claim, do not report it."
+            echo ""
+            echo "Do NOT report generic suggestions about code style, docstrings, comments, or"
+            echo "test coverage unless they are directly tied to a real correctness or security"
+            echo "bug you found in this diff, stated with Input/Expected/Actual as above."
+            echo ""
+            echo "List findings most important first. Prefer a short list of precise, verified"
+            echo "findings over a long generic checklist."
             echo ""
             echo "Diff:"
             cat /tmp/pr.diff.trimmed
           } > "$PROMPT_FILE"
 
-          jq -Rs --arg model "$OLLAMA_MODEL" '{model: $model, prompt: ., stream: false, options: {num_predict: 500, temperature: 0.2}}' \
+          jq -Rs --arg model "$OLLAMA_MODEL" '{model: $model, prompt: ., stream: false, options: {num_predict: 900, temperature: 0.2}}' \
             "$PROMPT_FILE" > /tmp/payload.json
 
           if ! curl -sS -m 300 -X POST "$OLLAMA_HOST/api/generate" \

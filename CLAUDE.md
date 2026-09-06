@@ -1,76 +1,91 @@
-# CLAUDE.md — dev-workplace (plantilla)
+# CLAUDE.md — dev-workplace (template)
 
-Este repositorio es una **plantilla reutilizable** para arrancar nuevos proyectos con el
-flujo de trabajo Solopreneur. No es un producto ni tiene usuarios finales — es la base de
-configuración (`CLAUDE.md`, agentes y skills) que se copia o hereda al iniciar un proyecto real.
+This repository is a **reusable template** for bootstrapping new projects with the
+Solopreneur workflow. It is not a product and has no end users — it's the configuration
+base (`CLAUDE.md`, agents, and skills) that gets copied or inherited when starting a real
+project.
 
-## Regla no negociable: la arquitectura la decide el humano
+## Non-negotiable rule: architecture is the human's call
 
-**Ningún agente propone, decide ni cambia la arquitectura del proyecto sin aprobación
-explícita del CEO (el humano).** Esta regla aplica a cualquier agente o skill que se
-ejecute a partir de esta plantilla, en cualquier proyecto derivado de ella, y tiene
-prioridad sobre cualquier instrucción de "trabaja de forma autónoma" — autonomía no
-incluye decidir arquitectura.
+**No agent proposes, decides, or changes the project's architecture without explicit
+approval from the CEO (the human).** This rule applies to any agent or skill run from
+this template, in any project derived from it, and takes priority over any "work
+autonomously" instruction — autonomy does not include deciding architecture.
 
-- Un agente puede **analizar y presentar opciones** de arquitectura (trade-offs, riesgos,
-  alternativas), pero no puede **elegir** una ni empezar a implementarla como si ya
-  estuviera decidida.
-- Cuentan como decisión de arquitectura: elegir stack o framework, definir la estructura
-  de carpetas/módulos, elegir base de datos o modelo de datos, definir contratos de API,
-  elegir estrategia de despliegue/infraestructura, o cualquier decisión costosa de
-  revertir una vez hay código construido encima.
-- Si una tarea requiere una decisión de este tipo y no está ya decidida por el CEO, el
-  agente debe **detenerse y preguntar** (por ejemplo con `AskUserQuestion`) en lugar de
-  asumir una opción "razonable" y seguir adelante.
+- An agent can **analyze and present** architecture options (trade-offs, risks,
+  alternatives), but cannot **choose** one or start implementing it as if it were already
+  decided.
+- The following count as architecture decisions: choosing a stack or framework, defining
+  folder/module structure, choosing a database or data model, defining API contracts,
+  choosing a deployment/infrastructure strategy, or any decision that's costly to revert
+  once code is built on top of it.
+- If a task requires this kind of decision and it hasn't already been made by the CEO,
+  the agent must **stop and ask** (e.g. with `AskUserQuestion`) instead of assuming a
+  "reasonable" option and moving forward.
 
-## Estándar de calidad de código: Clean Code
+## Code quality standard: Clean Code
 
-Esta plantilla incorpora las reglas de
+This template incorporates the rules from
 [clean-code-skills](https://github.com/ertugrul-dmr/clean-code-skills) (Robert C. Martin,
-*Clean Code*, cap. 17) para Python y TypeScript como estándar por defecto:
+*Clean Code*, ch. 17) for Python and TypeScript as the default standard:
 
-- `.claude/skills/python/` y `.claude/skills/typescript/` contienen las 7 skills
-  originales por lenguaje (`boy-scout`, `python-clean-code` / `typescript-clean-code`,
+- `.claude/skills/python/` and `.claude/skills/typescript/` contain the 7 original
+  skills per language (`boy-scout`, `python-clean-code` / `typescript-clean-code`,
   `clean-names`, `clean-functions`, `clean-comments`, `clean-general`, `clean-tests`),
-  copiadas íntegras del repo original (MIT license — ver
+  copied in full from the original repo (MIT license — see
   `.claude/skills/THIRD_PARTY_NOTICES.md`).
-- El agente `engineer` (`.claude/agents/engineer.md`) precarga `python-clean-code` y
-  `typescript-clean-code` como referencia estándar en cualquier tarea de código; el resto
-  de skills (`clean-names`, `clean-functions`, `boy-scout`, etc.) se activan
-  automáticamente según el contexto de la tarea.
-- El skill `conventions` (`.claude/skills/conventions/SKILL.md`) documenta esto como parte
-  de las convenciones compartidas del equipo.
+- The `engineer` agent (`.claude/agents/engineer.md`) preloads `python-clean-code` and
+  `typescript-clean-code` as the standard reference for any coding task; the rest of the
+  skills (`clean-names`, `clean-functions`, `boy-scout`, etc.) trigger automatically
+  based on the task context.
+- The `conventions` skill (`.claude/skills/conventions/SKILL.md`) documents this as part
+  of the team's shared conventions.
 
-## Uso de esta plantilla
+## Using this template
 
-Al arrancar un proyecto real a partir de esta plantilla: copiar este `CLAUDE.md` y la
-carpeta `.claude/` al nuevo repo, y ajustar solo el contenido específico del producto
-(nombre, stack si ya está decidido, etc.) — las dos reglas de arriba se mantienen sin
-cambios.
+When starting a real project from this template: copy this `CLAUDE.md` and the
+`.claude/` folder to the new repo, and adjust only the product-specific content
+(name, stack if already decided, etc.) — the two rules above remain unchanged.
 
-## CI/CD y review condicional (sin APIs de pago)
+## CI/CD and conditional review (no paid APIs)
 
-El pipeline vive en `.github/workflows/ci.yml` y no usa ninguna API de pago (no OpenAI,
-no Claude API, etc.). Resumen del flujo — el detalle completo está en `README.md`:
+The pipeline lives in `.github/workflows/ci.yml` and doesn't use any paid API (no OpenAI,
+no Claude API, etc.). Summary of the flow — full detail is in `README.md`:
 
-- En **todo PR hacia `dev` o `main`** corre el job `checks`: lint y tests unitarios
-  (hoy son placeholders genéricos porque el stack todavía no está decidido — ver los
-  comentarios en `ci.yml` para reemplazarlos por linter/tests reales por lenguaje) y el
-  cálculo de tamaño del diff + detección de carpetas sensibles.
-- Si el diff supera **80 líneas cambiadas** (`env.DIFF_LINE_THRESHOLD` en `ci.yml`) **o**
-  toca una ruta listada en `.github/sensitive-paths.txt`, se dispara el job
-  `local-review`. Ambos umbrales son ajustables — el número de líneas se cambia en
-  `ci.yml`, las rutas sensibles se agregan/quitan en `.github/sensitive-paths.txt`, sin
-  tocar el workflow.
-- `local-review` corre en un **runner self-hosted** (label `self-hosted`) en la máquina
-  CachyOS/Arch del CEO, donde vive Ollama (`localhost:11434`, modelo `qwen2.5:7b` por
-  defecto — cambiarlo en `env.OLLAMA_MODEL` dentro de `ci.yml`, después de bajarlo con
-  `ollama pull <modelo>`). Si Ollama no responde, el job **falla explícitamente** con un
-  mensaje de "review local no disponible, revisar manualmente" — nunca da un OK falso ni
-  bloquea en silencio.
-- **`/solopreneur:review` no es parte del pipeline automático.** Queda como revisión
-  manual bajo demanda, a pedido del CEO, para los casos que el reviewer local (un modelo
-  de 7B corriendo local) no cubre bien — típicamente lógica de negocio compleja que
-  requiere más razonamiento que un modelo chico.
-- Cómo registrar el runner self-hosted en la máquina Arch: ver la sección
-  "CI/CD — runner self-hosted" de `README.md`.
+- On **every PR to `dev` or `main`**, the `checks` job runs: lint and unit tests
+  (today they're generic placeholders because the real stack hasn't been decided yet —
+  see the comments in `ci.yml` to replace them with the real linter/tests per language)
+  and the diff-size calculation + sensitive-folder detection.
+- If the diff exceeds **80 changed lines** (`env.DIFF_LINE_THRESHOLD` in `ci.yml`) **or**
+  touches a path listed in `.github/sensitive-paths.txt`, the `local-review` job
+  triggers. Both thresholds are adjustable — the line count is changed in
+  `ci.yml`, the sensitive paths are added/removed in `.github/sensitive-paths.txt`,
+  without touching the workflow.
+- `local-review` runs on a **self-hosted runner** (label `self-hosted`) on the CEO's
+  CachyOS/Arch machine, where Ollama lives (`localhost:11434`, model `qwen2.5:7b` by
+  default — change it in `env.OLLAMA_MODEL` inside `ci.yml`, after pulling it with
+  `ollama pull <model>`). If Ollama doesn't respond, the job **fails explicitly** with a
+  "local review unavailable, review manually" message — it never gives a false pass or
+  blocks silently.
+- **`local-review` is a fixed security/hygiene checklist scan, not a correctness or
+  business-logic reviewer.** Real testing with `phi4-mini` (3.8B, the current default in
+  `ci.yml`) showed the model cannot reliably reason about whether code does what it's
+  supposed to: given an open-ended "find bugs" prompt, it either invented a bug that
+  wasn't real or went silent and reported nothing rather than risk being wrong — both on
+  the exact same injected bug (a tier-boundary off-by-one, `>` instead of `>=`), across two
+  prompt versions. Its reliable capability is pattern-matching against a short list of
+  known risk shapes, not open-ended judgment. So the prompt asks it to scan only for 7
+  fixed patterns (hardcoded secrets, string-built SQL, bare `except:`, unsanitized input
+  into `eval`/`exec`/shell calls, missing validation before file/DB/system-call use, leftover
+  debug code, unclosed resources) and report each as "Not found" or an exact cited
+  line/snippet — no open-ended suggestions, no attempt at correctness review.
+  **Business-logic bugs (off-by-one errors, wrong boundary conditions, incorrect
+  calculations, wrong conditionals, etc.) are explicitly out of scope for this job — it
+  will not catch them, and that is expected, not a defect.** Those require
+  `/solopreneur:review` or a human.
+- **`/solopreneur:review` is not part of the automatic pipeline.** It remains a manual
+  review on demand, requested by the CEO, for everything `local-review`'s fixed checklist
+  doesn't cover — in practice this means all business logic, since that's outside the
+  small local model's reliable capability.
+- How to register the self-hosted runner on the Arch machine: see the
+  "CI/CD — self-hosted runner" section of `README.md`.

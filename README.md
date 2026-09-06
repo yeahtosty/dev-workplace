@@ -1,116 +1,152 @@
-# dev-workplace (plantilla)
+# dev-workplace (template)
 
-Plantilla reutilizable del flujo de trabajo Solopreneur. Ver `CLAUDE.md` para las reglas
-del proyecto (arquitectura la decide el CEO, estándar de código Clean Code, etc.).
+Reusable template for the Solopreneur workflow. See `CLAUDE.md` for the project rules
+(architecture is the CEO's call, Clean Code standard, etc.).
 
 ## CI/CD
 
-El pipeline vive en `.github/workflows/ci.yml` y corre en cada PR hacia `dev` o `main`.
-No usa ninguna API de pago: el review con IA corre en un modelo local vía Ollama.
+The pipeline lives in `.github/workflows/ci.yml` and runs on every PR to `dev` or `main`.
+It doesn't use any paid API: the AI review runs on a local model via Ollama.
 
-### 1. Job `checks` (siempre corre)
+### 1. `checks` job (always runs)
 
-- **Lint** y **tests unitarios**: hoy son placeholders (`echo "TODO..."`) porque este
-  repo es una plantilla y el stack real todavía no está decidido. Cuando se decida,
-  reemplazar esos dos steps en `ci.yml` — ahí mismo hay comentarios con ejemplos para
-  Python, Node/TS, Go y Rust.
-- **Análisis del diff**: cuenta las líneas cambiadas (insertions + deletions) contra el
-  base del PR y chequea si algún archivo modificado empieza con alguna de las rutas
-  listadas en `.github/sensitive-paths.txt`.
+- **Lint** and **unit tests**: today they're placeholders (`echo "TODO..."`) because this
+  repo is a template and the real stack hasn't been decided yet. Once it is, replace
+  those two steps in `ci.yml` — right there are comments with examples for
+  Python, Node/TS, Go, and Rust.
+- **Diff analysis**: counts changed lines (insertions + deletions) against the
+  PR's base and checks whether any modified file starts with one of the paths
+  listed in `.github/sensitive-paths.txt`.
 
-### 2. Job `local-review` (condicional)
+### 2. `local-review` job (conditional)
 
-Se dispara solo si:
+Triggers only if:
 
-- el diff cambia más de **80 líneas** (ajustable en `env.DIFF_LINE_THRESHOLD` dentro de
-  `.github/workflows/ci.yml`), **o**
-- toca alguna carpeta listada en `.github/sensitive-paths.txt` (por defecto: `auth/`,
-  `payments/`, `security/`, `migrations/` — ajustable editando ese archivo, una ruta por
-  línea).
+- the diff changes more than **80 lines** (adjustable in `env.DIFF_LINE_THRESHOLD` inside
+  `.github/workflows/ci.yml`), **or**
+- it touches a folder listed in `.github/sensitive-paths.txt` (by default: `auth/`,
+  `payments/`, `security/`, `migrations/` — adjustable by editing that file, one path per
+  line).
 
-Corre en un **runner self-hosted** (label `self-hosted`) y hace lo siguiente:
+Runs on a **self-hosted runner** (label `self-hosted`) and does the following:
 
-1. Obtiene el diff del PR.
-2. Chequea que Ollama esté disponible en `http://localhost:11434`.
-3. Le manda el diff al modelo local (`qwen2.5:7b` por defecto) vía la API de Ollama
-   (`POST /api/generate`).
-4. Postea la respuesta como comentario en el PR usando la GitHub API (`gh pr comment`,
-   con el `GITHUB_TOKEN` que Actions provee automáticamente — no hace falta un token
-   propio).
+1. Gets the PR's diff.
+2. Checks that Ollama is available at `http://localhost:11434`.
+3. Sends the diff to the local model (`qwen2.5:7b` by default) via the Ollama
+   API (`POST /api/generate`).
+4. Posts the response as a PR comment using the GitHub API (`gh pr comment`,
+   with the `GITHUB_TOKEN` that Actions provides automatically — no need for a
+   personal token).
 
-**Si Ollama no está disponible** (timeout o conexión rechazada), el job **falla
-explícitamente** con un mensaje `"review local no disponible, revisar manualmente"` —
-nunca da un OK falso ni bloquea el merge en silencio. Si el check está marcado como
-requerido en la protección de rama, el PR queda bloqueado hasta que alguien revise a
-mano o el runner/Ollama vuelvan a estar disponibles.
+**If Ollama isn't available** (timeout or connection refused), the job **fails
+explicitly** with a `"local review unavailable, review manually"` message —
+it never gives a false pass or blocks the merge silently. If the check is marked as
+required in branch protection, the PR stays blocked until someone reviews it manually
+or the runner/Ollama become available again.
 
-#### Cambiar el modelo de Ollama
+#### Scope: a fixed risk checklist, not a bug/correctness reviewer
 
-Bajar el modelo en la máquina del runner y actualizar `env.OLLAMA_MODEL` en
+The prompt does **not** ask the model to find bugs or reason about whether the code is
+correct. It gives it a fixed checklist of 7 low-ambiguity risk patterns to scan the diff
+for, and nothing else:
+
+1. Hardcoded secrets, API keys, tokens, or passwords in code or config
+2. SQL queries built via string concatenation/formatting instead of parameterized queries
+3. Bare `except:` clauses or empty exception handlers that silently swallow errors
+4. User input passed directly to `eval()`, `exec()`, `os.system()`, or shell commands
+   without sanitization
+5. Missing input validation on function parameters that are later used in file paths,
+   DB queries, or system calls
+6. Debug code left in (print statements, `console.log`, commented-out blocks,
+   `TODO`/`FIXME`/`XXX` markers)
+7. Obvious resource leaks (files/connections opened without being closed or without a
+   context manager)
+
+For each item it must answer "Not found" or cite the exact line/snippet — no free-form
+suggestions, no docstring/style/test commentary. If none of the 7 apply, the whole review
+is just `"No matches found in this diff."`
+
+This scope is intentional, based on real testing: we ran `phi4-mini` (3.8B, the current
+default) against a diff containing a genuine but subtle business-logic bug (a tier-boundary
+off-by-one — `>` used instead of `>=`) with an earlier, open-ended "find bugs, give
+Input/Expected/Actual" prompt. Across two prompt iterations, the model never reliably
+caught it — it either invented a bug that wasn't actually there, or, once the prompt
+demanded rigor, went silent and reported nothing rather than risk being wrong. A 3.8B
+local model isn't a substitute for reasoning about correctness; it can reliably
+pattern-match a short list of known-bad shapes, so that's what this job asks it to do.
+**Business-logic bugs — off-by-one errors, wrong boundary conditions, incorrect
+calculations, wrong conditionals, and similar — are explicitly out of scope for
+`local-review` and it will not catch them. That's expected, not a defect in this job's
+configuration.** Those need `/solopreneur:review` or a human reviewer.
+
+#### Changing the Ollama model
+
+Pull the model on the runner machine and update `env.OLLAMA_MODEL` in
 `.github/workflows/ci.yml`:
 
 ```bash
-ollama pull llama3.1:8b   # o el modelo que se quiera usar
+ollama pull llama3.1:8b   # or whichever model you want to use
 ```
 
 ```yaml
-# .github/workflows/ci.yml, job local-review
+# .github/workflows/ci.yml, local-review job
 env:
   OLLAMA_MODEL: llama3.1:8b
 ```
 
-### 3. `/solopreneur:review` — revisión manual, no automática
+### 3. `/solopreneur:review` — manual review, not automatic
 
-`/solopreneur:review` (del plugin Solopreneur) **no** corre en el pipeline. Queda
-disponible para que el CEO lo invoque a mano cuando el reviewer local (un modelo de ~7B
-corriendo en localhost) no cubre bien un caso — típicamente lógica de negocio compleja
-que necesita más razonamiento que el que puede dar un modelo chico local.
+`/solopreneur:review` (from the Solopreneur plugin) does **not** run in the pipeline. It
+remains available for the CEO to invoke manually for everything `local-review`'s fixed
+checklist doesn't cover — in practice, that means all business-logic and correctness
+review, since a small local model isn't reliable at that kind of open-ended reasoning
+(see "Scope" above).
 
-## Runner self-hosted en la máquina Arch/CachyOS
+## Self-hosted runner on the Arch/CachyOS machine
 
-El job `local-review` necesita un runner registrado con la label `self-hosted` en esta
-máquina (donde corre Ollama). Pasos reales para registrarlo (reemplazar `<TOKEN>` con el
-valor que te da el comando de `gh api`):
+The `local-review` job needs a runner registered with the `self-hosted` label on this
+machine (where Ollama runs). Actual steps to register it (replace `<TOKEN>` with the
+value given by the `gh api` command):
 
 ```bash
-# 1. Crear una carpeta para el runner y entrar
+# 1. Create a folder for the runner and enter it
 mkdir -p ~/actions-runner && cd ~/actions-runner
 
-# 2. Descargar el paquete del runner (chequear la última versión en
-#    https://github.com/actions/runner/releases y ajustar la URL/versión)
+# 2. Download the runner package (check the latest version at
+#    https://github.com/actions/runner/releases and adjust the URL/version)
 curl -o actions-runner-linux-x64.tar.gz -L \
   https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64-<VERSION>.tar.gz
 tar xzf actions-runner-linux-x64.tar.gz
 
-# 3. Pedir un token de registro para este repo con gh (ya autenticado con `gh auth login`)
+# 3. Request a registration token for this repo with gh (already authenticated with `gh auth login`)
 TOKEN=$(gh api -X POST repos/yeahtosty/dev-workplace/actions/runners/registration-token --jq .token)
 
-# 4. Configurar el runner con ese token y la label "self-hosted"
+# 4. Configure the runner with that token and the "self-hosted" label
 ./config.sh --url https://github.com/yeahtosty/dev-workplace --token "$TOKEN" --labels self-hosted
 
-# 5a. Correrlo en foreground (para probar)
+# 5a. Run it in the foreground (to test)
 ./run.sh
 
-# 5b. O instalarlo como servicio systemd para que quede corriendo siempre
+# 5b. Or install it as a systemd service so it keeps running
 sudo ./svc.sh install
 sudo ./svc.sh start
 ```
 
-Alternativa sin `gh api`: ir a **Settings → Actions → Runners → New self-hosted runner**
-en `https://github.com/yeahtosty/dev-workplace`, que muestra los mismos comandos con el
-token ya generado.
+Alternative without `gh api`: go to **Settings → Actions → Runners → New self-hosted runner**
+on `https://github.com/yeahtosty/dev-workplace`, which shows the same commands with the
+token already generated.
 
-Requisito previo en esta máquina: Ollama corriendo y accesible en `localhost:11434`, con
-el modelo default ya bajado:
+Prerequisite on this machine: Ollama running and reachable at `localhost:11434`, with
+the default model already pulled:
 
 ```bash
 ollama pull qwen2.5:7b
 ```
 
-## Ajustar los umbrales del review condicional
+## Adjusting the conditional review thresholds
 
-| Qué ajustar | Dónde |
+| What to adjust | Where |
 |---|---|
-| Umbral de líneas cambiadas (default: 80) | `env.DIFF_LINE_THRESHOLD` en `.github/workflows/ci.yml` |
-| Carpetas/rutas sensibles | `.github/sensitive-paths.txt` (una ruta por línea, funciona como prefijo) |
-| Modelo de Ollama (default: `qwen2.5:7b`) | `env.OLLAMA_MODEL` en el job `local-review` de `.github/workflows/ci.yml` |
+| Changed-lines threshold (default: 80) | `env.DIFF_LINE_THRESHOLD` in `.github/workflows/ci.yml` |
+| Sensitive folders/paths | `.github/sensitive-paths.txt` (one path per line, works as a prefix) |
+| Ollama model (default: `qwen2.5:7b`) | `env.OLLAMA_MODEL` in the `local-review` job in `.github/workflows/ci.yml` |

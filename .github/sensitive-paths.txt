@@ -1,16 +1,16 @@
-# Carpetas/rutas sensibles del proyecto.
+# Sensitive folders/paths for this project.
 #
-# Si un PR toca alguna ruta listada aquí, el job "local-review" se dispara
-# SIEMPRE, sin importar el tamaño del diff (ver .github/workflows/ci.yml).
+# If a PR touches any path listed here, the "local-review" job ALWAYS
+# triggers, regardless of diff size (see .github/workflows/ci.yml).
 #
-# Formato: una ruta (o prefijo de ruta) por línea, relativa a la raíz del repo.
-# - Las líneas vacías y las que empiezan con "#" se ignoran.
-# - El match es "contiene esta ruta como prefijo" (no es un glob ni regex),
-#   así que "auth/" matchea "backend/auth/login.py" solo si escribís
-#   "backend/auth/". Ajustá las rutas a la estructura real del proyecto
-#   cuando el stack esté decidido.
+# Format: one path (or path prefix) per line, relative to the repo root.
+# - Empty lines and lines starting with "#" are ignored.
+# - The match is "contains this path as a prefix" (not a glob or regex),
+#   so "auth/" matches "backend/auth/login.py" only if you write
+#   "backend/auth/". Adjust the paths to the project's real structure
+#   once the stack is decided.
 #
-# Editar esta lista para agregar/quitar carpetas sensibles del proyecto.
+# Edit this list to add/remove sensitive folders for the project.
 
 auth/
 payments/

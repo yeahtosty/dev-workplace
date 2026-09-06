@@ -1,26 +1,26 @@
 name: CI
 
-# Corre en cada PR hacia dev o main.
+# Runs on every PR to dev or main.
 on:
   pull_request:
     branches: [dev, main]
 
 env:
-  # Umbral de líneas cambiadas (insertions + deletions) a partir del cual se
-  # dispara el job "local-review" aunque el PR no toque carpetas sensibles.
-  # Ajustar este número según el proyecto.
+  # Threshold of changed lines (insertions + deletions) above which the
+  # "local-review" job triggers even if the PR doesn't touch sensitive
+  # folders. Adjust this number based on the project.
   DIFF_LINE_THRESHOLD: 80
-  # Lista de carpetas/rutas sensibles. Editar ese archivo, no este workflow,
-  # para agregar o quitar rutas.
+  # List of sensitive folders/paths. Edit that file, not this workflow,
+  # to add or remove paths.
   SENSITIVE_PATHS_FILE: .github/sensitive-paths.txt
 
 jobs:
   # ---------------------------------------------------------------------
-  # Job que SIEMPRE corre: lint, tests unitarios, y el cálculo de si hace
-  # falta disparar la revisión local con IA.
+  # Job that ALWAYS runs: lint, unit tests, and the calculation of
+  # whether the local AI review needs to be triggered.
   # ---------------------------------------------------------------------
   checks:
-    name: Lint, tests y análisis de diff
+    name: Lint, tests, and diff analysis
     runs-on: ubuntu-latest
     outputs:
       trigger_review: ${{ steps.diff-check.outputs.trigger_review }}
@@ -30,39 +30,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # fetch-depth 0 porque necesitamos diffear contra el base del PR.
+          # fetch-depth 0 because we need to diff against the PR's base.
           fetch-depth: 0
 
       # ---------------------------------------------------------------
-      # LINT — placeholder genérico. El stack real todavía no está
-      # decidido para este proyecto (es una plantilla). Reemplazar este
-      # step por el linter correspondiente cuando se decida, por ejemplo:
+      # LINT — generic placeholder. The real stack hasn't been decided
+      # yet for this project (it's a template). Replace this step with
+      # the corresponding linter once it's decided, for example:
       #
       #   Python:   pip install ruff && ruff check .
       #   Node/TS:  npm ci && npm run lint
       #   Go:       go vet ./... && staticcheck ./...
       #   Rust:     cargo clippy --all-targets --all-features -- -D warnings
       # ---------------------------------------------------------------
-      - name: Lint (placeholder — reemplazar por el linter real)
+      - name: Lint (placeholder — replace with the real linter)
         run: |
-          echo "TODO(ci): no hay linter configurado todavía."
-          echo "Reemplazar este step por el linter del stack elegido (ver comentarios en ci.yml)."
+          echo "TODO(ci): no linter configured yet."
+          echo "Replace this step with the linter for the chosen stack (see comments in ci.yml)."
 
       # ---------------------------------------------------------------
-      # TESTS — placeholder genérico. Reemplazar cuando el stack esté
-      # decidido, por ejemplo:
+      # TESTS — generic placeholder. Replace once the stack is
+      # decided, for example:
       #
       #   Python:   pip install -r requirements.txt && pytest
       #   Node/TS:  npm ci && npm test
       #   Go:       go test ./...
       #   Rust:     cargo test
       # ---------------------------------------------------------------
-      - name: Unit tests (placeholder — reemplazar por los tests reales)
+      - name: Unit tests (placeholder — replace with real tests)
         run: |
-          echo "TODO(ci): no hay tests unitarios configurados todavía."
-          echo "Reemplazar este step por el runner de tests del stack elegido (ver comentarios en ci.yml)."
+          echo "TODO(ci): no unit tests configured yet."
+          echo "Replace this step with the test runner for the chosen stack (see comments in ci.yml)."
 
-      - name: Calcular tamaño del diff y carpetas sensibles
+      - name: Calculate diff size and sensitive folders
         id: diff-check
         run: |
           set -euo pipefail
@@ -70,19 +70,19 @@ jobs:
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
 
-          # Suma de líneas insertadas + borradas en todo el diff del PR.
+          # Sum of inserted + deleted lines across the whole PR diff.
           DIFF_LINES=$(git diff --numstat "$BASE_SHA" "$HEAD_SHA" \
             | awk '{add+=$1; del+=$2} END {print add+del+0}')
-          echo "Líneas cambiadas en el diff: $DIFF_LINES (umbral: $DIFF_LINE_THRESHOLD)"
+          echo "Changed lines in the diff: $DIFF_LINES (threshold: $DIFF_LINE_THRESHOLD)"
 
           CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          echo "Archivos modificados:"
+          echo "Modified files:"
           echo "$CHANGED_FILES"
 
           SENSITIVE_HIT=false
           if [ -f "$SENSITIVE_PATHS_FILE" ]; then
             while IFS= read -r raw_path || [ -n "$raw_path" ]; do
-              # Ignorar comentarios y líneas vacías.
+              # Ignore comments and empty lines.
               path="${raw_path%%#*}"
               path="$(echo "$path" | xargs)"
               [ -z "$path" ] && continue
@@ -91,7 +91,7 @@ jobs:
                 [ -z "$file" ] && continue
                 case "$file" in
                   "$path"*)
-                    echo "Ruta sensible detectada: $file (regla: $path)"
+                    echo "Sensitive path detected: $file (rule: $path)"
                     SENSITIVE_HIT=true
                     ;;
                 esac
@@ -111,37 +111,37 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           {
-            echo "### Resumen del diff"
-            echo "- Líneas cambiadas: $DIFF_LINES (umbral: $DIFF_LINE_THRESHOLD)"
-            echo "- ¿Toca carpeta sensible?: $SENSITIVE_HIT"
-            echo "- ¿Dispara \`local-review\`?: $TRIGGER"
+            echo "### Diff summary"
+            echo "- Changed lines: $DIFF_LINES (threshold: $DIFF_LINE_THRESHOLD)"
+            echo "- Touches sensitive folder?: $SENSITIVE_HIT"
+            echo "- Triggers \`local-review\`?: $TRIGGER"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------
-  # Job condicional: solo corre si el diff supera el umbral o toca una
-  # carpeta sensible. Pensado para un runner self-hosted en una máquina
-  # con Ollama corriendo en localhost:11434 (sin usar ninguna API de pago).
+  # Conditional job: only runs if the diff exceeds the threshold or
+  # touches a sensitive folder. Designed for a self-hosted runner on a
+  # machine with Ollama running on localhost:11434 (no paid API used).
   #
-  # Registrar el runner (ver README.md / CLAUDE.md) con la label
-  # "self-hosted" para que este job pueda ejecutarse ahí.
+  # Register the runner (see README.md / CLAUDE.md) with the
+  # "self-hosted" label so this job can run there.
   # ---------------------------------------------------------------------
   local-review:
-    name: Review local (Ollama)
+    name: Local review (Ollama)
     needs: checks
     if: needs.checks.outputs.trigger_review == 'true'
     runs-on: [self-hosted]
-    # Permisos mínimos scoped a este job: necesita comentar en el PR
-    # (gh pr comment) pero no debe heredar más que lectura del contenido.
-    # No tocar los permisos por defecto del repo (solo lectura) ni agregar
-    # este bloque a nivel de workflow — dejaría todos los jobs con más
-    # permisos de los que necesitan.
+    # Minimum permissions scoped to this job: it needs to comment on the
+    # PR (gh pr comment) but shouldn't inherit more than read access to
+    # contents. Don't touch the repo's default permissions (read-only) or
+    # add this block at the workflow level — that would leave every job
+    # with more permissions than it needs.
     permissions:
       contents: read
       pull-requests: write
     env:
       OLLAMA_HOST: http://localhost:11434
-      # Modelo a usar. Para cambiarlo: descargarlo con `ollama pull <modelo>`
-      # en la máquina del runner y actualizar este valor.
+      # Model to use. To change it: pull it with `ollama pull <model>`
+      # on the runner machine and update this value.
       OLLAMA_MODEL: phi4-mini
     steps:
       - name: Checkout
@@ -149,16 +149,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Obtener diff del PR
+      - name: Get the PR diff
         run: |
           set -euo pipefail
           git diff "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > /tmp/pr.diff
-          # Acotamos el tamaño para no saturar el contexto del modelo local
-          # (no es un límite de costo, es un límite de contexto del modelo).
+          # Trim the size so we don't overflow the local model's context
+          # (this isn't a cost limit, it's the model's context limit).
           head -c 60000 /tmp/pr.diff > /tmp/pr.diff.trimmed
-          echo "Diff truncado a $(wc -c < /tmp/pr.diff.trimmed) bytes (de $(wc -c < /tmp/pr.diff) originales)."
+          echo "Diff truncated to $(wc -c < /tmp/pr.diff.trimmed) bytes (from $(wc -c < /tmp/pr.diff) originally)."
 
-      - name: Verificar disponibilidad de Ollama
+      - name: Check Ollama availability
         id: check-ollama
         run: |
           set +e
@@ -171,13 +171,13 @@ jobs:
             echo "unavailable=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Review local no disponible
+      - name: Local review unavailable
         if: steps.check-ollama.outputs.unavailable == 'true'
         run: |
-          echo "::error::Review local no disponible: no se pudo conectar a Ollama en $OLLAMA_HOST (timeout o conexión rechazada). Revisar manualmente."
+          echo "::error::Local review unavailable: couldn't connect to Ollama at $OLLAMA_HOST (timeout or connection refused). Review manually."
           exit 1
 
-      - name: Enviar diff a Ollama
+      - name: Send diff to Ollama
         id: ollama-review
         if: steps.check-ollama.outputs.unavailable == 'false'
         run: |
@@ -185,9 +185,9 @@ jobs:
 
           PROMPT_FILE=$(mktemp)
           {
-            echo "Sos un revisor de código senior. Analizá el siguiente diff de un pull request."
-            echo "Reportá, en español y de forma concisa: posibles bugs, problemas de seguridad,"
-            echo "y sugerencias de mejora. Priorizá los hallazgos más importantes primero."
+            echo "You are a senior code reviewer. Analyze the following pull request diff."
+            echo "Report, concisely: possible bugs, security issues, and suggestions for"
+            echo "improvement. Prioritize the most important findings first."
             echo ""
             echo "Diff:"
             cat /tmp/pr.diff.trimmed
@@ -200,32 +200,32 @@ jobs:
               -H "Content-Type: application/json" \
               -d @/tmp/payload.json \
               -o /tmp/ollama_response.json; then
-            echo "::error::Review local no disponible: fallo al llamar a la API de Ollama en $OLLAMA_HOST. Revisar manualmente."
+            echo "::error::Local review unavailable: failed to call the Ollama API at $OLLAMA_HOST. Review manually."
             exit 1
           fi
 
           jq -r '.response // empty' /tmp/ollama_response.json > /tmp/review.txt
 
           if [ ! -s /tmp/review.txt ]; then
-            echo "::error::Review local no disponible: Ollama respondió sin contenido. Revisar manualmente."
+            echo "::error::Local review unavailable: Ollama responded with no content. Review manually."
             exit 1
           fi
 
-      - name: Postear comentario en el PR
+      - name: Post PR comment
         if: steps.ollama-review.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           {
-            echo "## Review local (Ollama · $OLLAMA_MODEL)"
+            echo "## Local review (Ollama · $OLLAMA_MODEL)"
             echo ""
             cat /tmp/review.txt
             echo ""
             echo "---"
-            echo "_Generado automáticamente por el job \`local-review\` en un runner self-hosted,"
-            echo "sin usar APIs de pago. Para revisión manual de casos que este reviewer no cubre"
-            echo "bien (lógica de negocio compleja), usar \`/solopreneur:review\`._"
+            echo "_Automatically generated by the \`local-review\` job on a self-hosted runner,"
+            echo "without using any paid API. For manual review of cases this reviewer doesn't"
+            echo "cover well (complex business logic), use \`/solopreneur:review\`._"
           } > /tmp/comment-body.md
 
           gh pr comment "${{ github.event.pull_request.number }}" \

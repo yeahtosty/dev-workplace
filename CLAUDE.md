@@ -47,10 +47,11 @@ When starting a real project from this template: copy this `CLAUDE.md` and the
 `.claude/` folder to the new repo, and adjust only the product-specific content
 (name, stack if already decided, etc.) — the two rules above remain unchanged.
 
-## CI/CD and conditional review (no paid APIs)
+## CI/CD and conditional review (no paid APIs, no local LLM)
 
 The pipeline lives in `.github/workflows/ci.yml` and doesn't use any paid API (no OpenAI,
-no Claude API, etc.). Summary of the flow — full detail is in `README.md`:
+no Claude API, etc.) — and, as of this version, no AI model of any kind. Summary of the
+flow — full detail is in `README.md`:
 
 - On **every PR to `dev` or `main`**, the `checks` job runs: lint and unit tests
   (today they're generic placeholders because the real stack hasn't been decided yet —
@@ -61,31 +62,32 @@ no Claude API, etc.). Summary of the flow — full detail is in `README.md`:
   triggers. Both thresholds are adjustable — the line count is changed in
   `ci.yml`, the sensitive paths are added/removed in `.github/sensitive-paths.txt`,
   without touching the workflow.
-- `local-review` runs on a **self-hosted runner** (label `self-hosted`) on the CEO's
-  CachyOS/Arch machine, where Ollama lives (`localhost:11434`, model `qwen2.5:7b` by
-  default — change it in `env.OLLAMA_MODEL` inside `ci.yml`, after pulling it with
-  `ollama pull <model>`). If Ollama doesn't respond, the job **fails explicitly** with a
-  "local review unavailable, review manually" message — it never gives a false pass or
-  blocks silently.
-- **`local-review` is a fixed security/hygiene checklist scan, not a correctness or
-  business-logic reviewer.** Real testing with `phi4-mini` (3.8B, the current default in
-  `ci.yml`) showed the model cannot reliably reason about whether code does what it's
-  supposed to: given an open-ended "find bugs" prompt, it either invented a bug that
-  wasn't real or went silent and reported nothing rather than risk being wrong — both on
-  the exact same injected bug (a tier-boundary off-by-one, `>` instead of `>=`), across two
-  prompt versions. Its reliable capability is pattern-matching against a short list of
-  known risk shapes, not open-ended judgment. So the prompt asks it to scan only for 7
-  fixed patterns (hardcoded secrets, string-built SQL, bare `except:`, unsanitized input
-  into `eval`/`exec`/shell calls, missing validation before file/DB/system-call use, leftover
-  debug code, unclosed resources) and report each as "Not found" or an exact cited
-  line/snippet — no open-ended suggestions, no attempt at correctness review.
-  **Business-logic bugs (off-by-one errors, wrong boundary conditions, incorrect
-  calculations, wrong conditionals, etc.) are explicitly out of scope for this job — it
-  will not catch them, and that is expected, not a defect.** Those require
-  `/solopreneur:review` or a human.
+- **`local-review` is a deterministic pattern scanner, not an AI reviewer.**
+  `.github/scripts/local_review_scan.py` regex-scans the diff's added lines for 6 fixed
+  risk patterns — hardcoded secrets/API keys/tokens, SQL built via string
+  concatenation/f-strings/`.format()`, bare `except:`/empty except-or-catch blocks,
+  `eval`/`exec`/`os.system`/`subprocess(..., shell=True)`, leftover debug code
+  (`print`/`console.log`/`debugger;`/`TODO`/`FIXME`/`XXX`), and `open()` without a
+  context manager (flagged as a heuristic warning — this one has real false-positive
+  risk). Pure text matching against the actual diff content, with real file:line
+  citations — nothing to hallucinate, nothing that requires judgment. If none of the 6
+  apply, the PR comment is just `"No matches found in this diff."` It runs on a
+  GitHub-hosted runner, same as `checks` — **no self-hosted runner or Ollama needed for
+  this job anymore.**
+  - **This replaces an earlier Ollama/phi4-mini-based version of this job.** Three real
+    tests against `phi4-mini` (3.8B, local) — open-ended bug-hunting, a strict
+    Input/Expected/Actual requirement, and a fixed 7-item checklist — each either
+    hallucinated a finding that wasn't in the diff or produced broken/contradictory
+    output, even on a closed, low-ambiguity checklist it only had to pattern-match
+    against. A 3.8B local model isn't reliable even for that, so this job stopped
+    calling a model at all. See the "Future option: local LLM review" note in
+    `README.md` if this is revisited with better hardware.
+  - **This is not a correctness or business-logic reviewer**, same as before it became
+    deterministic: it only catches the 6 fixed patterns above. Business-logic bugs
+    (off-by-one errors, wrong boundary conditions, incorrect calculations, wrong
+    conditionals, etc.) and anything needing actual reasoning are explicitly out of
+    scope — it will not catch them, and that is expected, not a defect.
 - **`/solopreneur:review` is not part of the automatic pipeline.** It remains a manual
-  review on demand, requested by the CEO, for everything `local-review`'s fixed checklist
-  doesn't cover — in practice this means all business logic, since that's outside the
-  small local model's reliable capability.
-- How to register the self-hosted runner on the Arch machine: see the
-  "CI/CD — self-hosted runner" section of `README.md`.
+  review on demand, requested by the CEO, for everything `local-review`'s fixed pattern
+  scan doesn't cover — in practice, all business logic, architecture, and security
+  judgment beyond pattern-matching.

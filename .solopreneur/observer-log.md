@@ -22,3 +22,9 @@
 **Alternatives**: Usar mi config global existente
 **Context**: git config user.name/user.email solo en este repo, sin tocar tu config global de git.
 ---
+
+## [2026-09-06 15:44:38] - PR #2 (traducción + checklist v2) sigue sin mergear a dev. ¿Cómo querés que arme la base de este nuevo PR del scanner determinístico?
+**Choice**: Ramificar desde la rama de PR #2 (recomendado)
+**Alternatives**: Ramificar desde dev tal cual está
+**Context**: chore/local-review-english-and-scope como base. El nuevo commit queda enfocado solo en el reemplazo LLM→scanner, pero como PR#2 sigue sin mergear, el PR hacia dev mostrará el diff acumulado (traducción+v1+v2+v3) hasta que mergees #2. Cuando mergees #2 primero, este PR se reduce solo a su propio diff.
+---

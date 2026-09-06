@@ -6,8 +6,23 @@ risk patterns. No model call, nothing that can hallucinate — pure regex text
 matching against the actual diff content, with real file:line references.
 """
 
+import fnmatch
 import re
 import sys
+
+# The scanner's own source and the docs describing it legitimately contain the
+# exact strings these checks look for (regex literals like r"\beval\s*\(",
+# prose mentioning TODO/FIXME, example snippets) — exclude that infrastructure
+# from all checks rather than trying to special-case each pattern around it.
+EXCLUDED_PATH_PATTERNS = [
+    ".github/scripts/*",
+    "*.md",
+    ".github/workflows/*.yml",
+]
+
+
+def is_excluded_path(path):
+    return any(fnmatch.fnmatch(path, pattern) for pattern in EXCLUDED_PATH_PATTERNS)
 
 
 def make_regex_checker(patterns):
@@ -173,6 +188,7 @@ def main():
         diff_text = f.read()
 
     added_lines = parse_added_lines(diff_text)
+    added_lines = [line for line in added_lines if not is_excluded_path(line[0])]
     findings = run_checks(added_lines)
     print(format_report(findings))
 

@@ -44,6 +44,41 @@ it never gives a false pass or blocks the merge silently. If the check is marked
 required in branch protection, the PR stays blocked until someone reviews it manually
 or the runner/Ollama become available again.
 
+#### Scope: a fixed risk checklist, not a bug/correctness reviewer
+
+The prompt does **not** ask the model to find bugs or reason about whether the code is
+correct. It gives it a fixed checklist of 7 low-ambiguity risk patterns to scan the diff
+for, and nothing else:
+
+1. Hardcoded secrets, API keys, tokens, or passwords in code or config
+2. SQL queries built via string concatenation/formatting instead of parameterized queries
+3. Bare `except:` clauses or empty exception handlers that silently swallow errors
+4. User input passed directly to `eval()`, `exec()`, `os.system()`, or shell commands
+   without sanitization
+5. Missing input validation on function parameters that are later used in file paths,
+   DB queries, or system calls
+6. Debug code left in (print statements, `console.log`, commented-out blocks,
+   `TODO`/`FIXME`/`XXX` markers)
+7. Obvious resource leaks (files/connections opened without being closed or without a
+   context manager)
+
+For each item it must answer "Not found" or cite the exact line/snippet — no free-form
+suggestions, no docstring/style/test commentary. If none of the 7 apply, the whole review
+is just `"No matches found in this diff."`
+
+This scope is intentional, based on real testing: we ran `phi4-mini` (3.8B, the current
+default) against a diff containing a genuine but subtle business-logic bug (a tier-boundary
+off-by-one — `>` used instead of `>=`) with an earlier, open-ended "find bugs, give
+Input/Expected/Actual" prompt. Across two prompt iterations, the model never reliably
+caught it — it either invented a bug that wasn't actually there, or, once the prompt
+demanded rigor, went silent and reported nothing rather than risk being wrong. A 3.8B
+local model isn't a substitute for reasoning about correctness; it can reliably
+pattern-match a short list of known-bad shapes, so that's what this job asks it to do.
+**Business-logic bugs — off-by-one errors, wrong boundary conditions, incorrect
+calculations, wrong conditionals, and similar — are explicitly out of scope for
+`local-review` and it will not catch them. That's expected, not a defect in this job's
+configuration.** Those need `/solopreneur:review` or a human reviewer.
+
 #### Changing the Ollama model
 
 Pull the model on the runner machine and update `env.OLLAMA_MODEL` in
@@ -62,9 +97,10 @@ env:
 ### 3. `/solopreneur:review` — manual review, not automatic
 
 `/solopreneur:review` (from the Solopreneur plugin) does **not** run in the pipeline. It
-remains available for the CEO to invoke manually when the local reviewer (a ~7B model
-running on localhost) doesn't cover a case well — typically complex business logic
-that needs more reasoning than a small local model can provide.
+remains available for the CEO to invoke manually for everything `local-review`'s fixed
+checklist doesn't cover — in practice, that means all business-logic and correctness
+review, since a small local model isn't reliable at that kind of open-ended reasoning
+(see "Scope" above).
 
 ## Self-hosted runner on the Arch/CachyOS machine
 

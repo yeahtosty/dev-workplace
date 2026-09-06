@@ -67,9 +67,25 @@ no Claude API, etc.). Summary of the flow — full detail is in `README.md`:
   `ollama pull <model>`). If Ollama doesn't respond, the job **fails explicitly** with a
   "local review unavailable, review manually" message — it never gives a false pass or
   blocks silently.
+- **`local-review` is a fixed security/hygiene checklist scan, not a correctness or
+  business-logic reviewer.** Real testing with `phi4-mini` (3.8B, the current default in
+  `ci.yml`) showed the model cannot reliably reason about whether code does what it's
+  supposed to: given an open-ended "find bugs" prompt, it either invented a bug that
+  wasn't real or went silent and reported nothing rather than risk being wrong — both on
+  the exact same injected bug (a tier-boundary off-by-one, `>` instead of `>=`), across two
+  prompt versions. Its reliable capability is pattern-matching against a short list of
+  known risk shapes, not open-ended judgment. So the prompt asks it to scan only for 7
+  fixed patterns (hardcoded secrets, string-built SQL, bare `except:`, unsanitized input
+  into `eval`/`exec`/shell calls, missing validation before file/DB/system-call use, leftover
+  debug code, unclosed resources) and report each as "Not found" or an exact cited
+  line/snippet — no open-ended suggestions, no attempt at correctness review.
+  **Business-logic bugs (off-by-one errors, wrong boundary conditions, incorrect
+  calculations, wrong conditionals, etc.) are explicitly out of scope for this job — it
+  will not catch them, and that is expected, not a defect.** Those require
+  `/solopreneur:review` or a human.
 - **`/solopreneur:review` is not part of the automatic pipeline.** It remains a manual
-  review on demand, requested by the CEO, for cases the local reviewer (a 7B model
-  running locally) doesn't cover well — typically complex business logic that needs
-  more reasoning than a small model can provide.
+  review on demand, requested by the CEO, for everything `local-review`'s fixed checklist
+  doesn't cover — in practice this means all business logic, since that's outside the
+  small local model's reliable capability.
 - How to register the self-hosted runner on the Arch machine: see the
   "CI/CD — self-hosted runner" section of `README.md`.

@@ -119,17 +119,15 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Conditional job: only runs if the diff exceeds the threshold or
-  # touches a sensitive folder. Designed for a self-hosted runner on a
-  # machine with Ollama running on localhost:11434 (no paid API used).
-  #
-  # Register the runner (see README.md / CLAUDE.md) with the
-  # "self-hosted" label so this job can run there.
+  # touches a sensitive folder. Deterministic pattern scan against the
+  # diff's added lines — no AI model, no external service, no self-hosted
+  # runner needed. Runs on a GitHub-hosted runner, same as `checks`.
   # ---------------------------------------------------------------------
   local-review:
-    name: Local review (Ollama)
+    name: Local review (pattern scan)
     needs: checks
     if: needs.checks.outputs.trigger_review == 'true'
-    runs-on: [self-hosted]
+    runs-on: ubuntu-latest
     # Minimum permissions scoped to this job: it needs to comment on the
     # PR (gh pr comment) but shouldn't inherit more than read access to
     # contents. Don't touch the repo's default permissions (read-only) or
@@ -138,11 +136,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    env:
-      OLLAMA_HOST: http://localhost:11434
-      # Model to use. To change it: pull it with `ollama pull <model>`
-      # on the runner machine and update this value.
-      OLLAMA_MODEL: phi4-mini
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -153,103 +146,27 @@ jobs:
         run: |
           set -euo pipefail
           git diff "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > /tmp/pr.diff
-          # Trim the size so we don't overflow the local model's context
-          # (this isn't a cost limit, it's the model's context limit).
-          head -c 60000 /tmp/pr.diff > /tmp/pr.diff.trimmed
-          echo "Diff truncated to $(wc -c < /tmp/pr.diff.trimmed) bytes (from $(wc -c < /tmp/pr.diff) originally)."
 
-      - name: Check Ollama availability
-        id: check-ollama
-        run: |
-          set +e
-          HTTP_CODE=$(curl -s -m 5 --connect-timeout 5 -o /dev/null -w "%{http_code}" "$OLLAMA_HOST/api/tags")
-          CURL_EXIT=$?
-          set -e
-          if [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP_CODE" != "200" ]; then
-            echo "unavailable=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "unavailable=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Local review unavailable
-        if: steps.check-ollama.outputs.unavailable == 'true'
-        run: |
-          echo "::error::Local review unavailable: couldn't connect to Ollama at $OLLAMA_HOST (timeout or connection refused). Review manually."
-          exit 1
-
-      - name: Send diff to Ollama
-        id: ollama-review
-        if: steps.check-ollama.outputs.unavailable == 'false'
+      - name: Scan diff for known risk patterns
         run: |
           set -euo pipefail
-
-          PROMPT_FILE=$(mktemp)
-          {
-            echo "You are scanning a pull request diff for a fixed checklist of known risk"
-            echo "patterns. This is NOT an open-ended code review: do not reason about"
-            echo "business logic, correctness, or whether the code does what it's supposed"
-            echo "to do. Only pattern-match against the 7 items below."
-            echo ""
-            echo "Checklist:"
-            echo "1. Hardcoded secrets, API keys, tokens, or passwords in code or config"
-            echo "2. SQL queries built via string concatenation/formatting instead of"
-            echo "   parameterized queries"
-            echo "3. Bare except: clauses or empty exception handlers that silently"
-            echo "   swallow errors"
-            echo "4. User input passed directly to eval(), exec(), os.system(), or shell"
-            echo "   commands without sanitization"
-            echo "5. Missing input validation on function parameters that are later used"
-            echo "   in file paths, DB queries, or system calls"
-            echo "6. Debug code left in (print statements, console.log, commented-out"
-            echo "   blocks, TODO/FIXME/XXX markers)"
-            echo "7. Obvious resource leaks (files/connections opened without being"
-            echo "   closed or without a context manager)"
-            echo ""
-            echo "Output format: exactly one line per checklist item, numbered 1-7, each"
-            echo "either \"N. Not found\" or \"N. Found: <exact line or snippet>\". Cite the"
-            echo "snippet itself only — no explanation, no suggestions, no docstring/style/"
-            echo "test commentary, no other text of any kind."
-            echo ""
-            echo "If all seven items are \"Not found\", do not print the checklist at all —"
-            echo "output only this single line: \"No matches found in this diff.\""
-            echo ""
-            echo "Diff:"
-            cat /tmp/pr.diff.trimmed
-          } > "$PROMPT_FILE"
-
-          jq -Rs --arg model "$OLLAMA_MODEL" '{model: $model, prompt: ., stream: false, options: {num_predict: 900, temperature: 0.2}}' \
-            "$PROMPT_FILE" > /tmp/payload.json
-
-          if ! curl -sS -m 300 -X POST "$OLLAMA_HOST/api/generate" \
-              -H "Content-Type: application/json" \
-              -d @/tmp/payload.json \
-              -o /tmp/ollama_response.json; then
-            echo "::error::Local review unavailable: failed to call the Ollama API at $OLLAMA_HOST. Review manually."
-            exit 1
-          fi
-
-          jq -r '.response // empty' /tmp/ollama_response.json > /tmp/review.txt
-
-          if [ ! -s /tmp/review.txt ]; then
-            echo "::error::Local review unavailable: Ollama responded with no content. Review manually."
-            exit 1
-          fi
+          python3 .github/scripts/local_review_scan.py /tmp/pr.diff > /tmp/review.txt
 
       - name: Post PR comment
-        if: steps.ollama-review.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           {
-            echo "## Local review (Ollama · $OLLAMA_MODEL)"
+            echo "## Local review (pattern scan)"
             echo ""
             cat /tmp/review.txt
             echo ""
             echo "---"
-            echo "_Automatically generated by the \`local-review\` job on a self-hosted runner,"
-            echo "without using any paid API. For manual review of cases this reviewer doesn't"
-            echo "cover well (complex business logic), use \`/solopreneur:review\`._"
+            echo "_Automatically generated by the \`local-review\` job — a deterministic"
+            echo "pattern scan of the diff's added lines, no AI model involved. For anything"
+            echo "needing actual judgment (business logic, architecture, security reasoning"
+            echo "beyond pattern-matching), use \`/solopreneur:review\`._"
           } > /tmp/comment-body.md
 
           gh pr comment "${{ github.event.pull_request.number }}" \
